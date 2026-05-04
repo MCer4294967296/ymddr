@@ -1,5 +1,5 @@
-import type { Memory, Note } from "./memory.js";
-import type { Message } from "./model.js";
+import type { Memory, Note } from "../memory/memory.js";
+import type { Message } from "../core/model.js";
 import type { ToolRegistry } from "../tools/index.js";
 
 // Common English stop words to filter out during keyword extraction

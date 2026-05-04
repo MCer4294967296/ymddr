@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type { ModelProvider, Message } from "./model.js";
-import type { Memory } from "./memory.js";
-import { ContextBuilder } from "./context.js";
+import type { Memory } from "../memory/memory.js";
+import { ContextBuilder } from "../context/context.js";
 import type { ToolRegistry } from "../tools/index.js";
+import { logger } from "../utils/logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,8 @@ export class Agent {
   }
 
   async processMessage(input: string): Promise<string> {
+    logger.userPrompt(input);
+
     // Save user input to history immediately
     this.saveMessage("user", input);
     
@@ -92,6 +95,8 @@ export class Agent {
     while (true) {
       // Call the model
       const response = await this.model.complete(currentMessages);
+      
+      logger.modelResponse(response);
 
       // Check for tool call
       const toolCallMatch = response.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
@@ -120,6 +125,8 @@ export class Agent {
         break;
       }
     }
+
+    logger.agentResponse(finalResponse);
 
     // Persist final assistant response
     this.saveMessage("assistant", finalResponse);

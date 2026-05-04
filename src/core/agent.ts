@@ -78,25 +78,54 @@ export class Agent {
       .run(uuidv4(), role, content, new Date().toISOString());
   }
 
-  /**
-   * Main orchestration loop.
-   * Receives user input → builds context → calls LLM → persists → returns response.
-   */
   async processMessage(input: string): Promise<string> {
-    // Build context from history + memories + input
-    const messages = this.context.build(this.history, input);
-
-    // Call the model
-    const response = await this.model.complete(messages);
-
-    // Persist both sides of the conversation
+    // Save user input to history immediately
     this.saveMessage("user", input);
+    
+    // Build initial context. We pass all history except the current input to avoid duplication
+    // because ContextBuilder.build appends the user input at the end.
+    let currentMessages = this.context.build(this.history, input, this.tools);
     this.history.push({ role: "user", content: input });
 
-    this.saveMessage("assistant", response);
-    this.history.push({ role: "assistant", content: response });
+    let finalResponse = "";
 
-    return response;
+    while (true) {
+      // Call the model
+      const response = await this.model.complete(currentMessages);
+
+      // Check for tool call
+      const toolCallMatch = response.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
+
+      if (toolCallMatch) {
+        let toolResult = "";
+        try {
+          const toolCall = JSON.parse(toolCallMatch[1]);
+          const tool = this.tools.get(toolCall.name);
+          if (tool) {
+            console.log(`  [Tool] Calling ${tool.name}...`);
+            toolResult = await tool.execute(toolCall.input);
+          } else {
+            toolResult = `Error: Tool "${toolCall.name}" not found.`;
+          }
+        } catch (err: any) {
+          toolResult = `Error parsing or executing tool call: ${err.message}`;
+        }
+
+        // Add the model's intermediate response and the tool's result to the message chain
+        currentMessages.push({ role: "assistant", content: response });
+        currentMessages.push({ role: "system", content: `Tool Result:\n${toolResult}` });
+      } else {
+        // No tool call means this is the final response
+        finalResponse = response;
+        break;
+      }
+    }
+
+    // Persist final assistant response
+    this.saveMessage("assistant", finalResponse);
+    this.history.push({ role: "assistant", content: finalResponse });
+
+    return finalResponse;
   }
 
   /** Expose memory for direct access (e.g., from tools or interfaces). */

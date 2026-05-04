@@ -1,5 +1,6 @@
 import type { Memory, Note } from "./memory.js";
 import type { Message } from "./model.js";
+import type { ToolRegistry } from "../tools/index.js";
 
 // Common English stop words to filter out during keyword extraction
 const STOP_WORDS = new Set([
@@ -37,11 +38,23 @@ export class ContextBuilder {
    *   2. Recent conversation history (last N messages)
    *   3. Current user input
    */
-  build(conversationHistory: Message[], userInput: string): Message[] {
+  build(conversationHistory: Message[], userInput: string, tools?: ToolRegistry): Message[] {
     const messages: Message[] = [];
 
-    // 1. System prompt + relevant memories
+    // 1. System prompt + relevant memories + tools
     let system = this.systemPrompt;
+    
+    if (tools) {
+      const toolList = tools.listAll();
+      if (toolList.length > 0) {
+        system += `\n\nYou have access to the following tools:\n`;
+        toolList.forEach(t => {
+          system += `- ${t.name}: ${t.description}\n`;
+        });
+        system += `\nTo use a tool, you MUST respond in the following EXACT format:\n<tool_call>\n{"name": "tool_name", "input": "your input string"}\n</tool_call>\n\nWait for the system to provide the tool's result before answering the user. If you do not need to use a tool, simply respond to the user normally.`;
+      }
+    }
+
     const relevantNotes = this.findRelevantNotes(userInput);
 
     if (relevantNotes.length > 0) {

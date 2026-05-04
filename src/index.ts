@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import Database from "better-sqlite3";
 import { config } from "./config.js";
-import { AnthropicProvider } from "./core/model.js";
+import { AnthropicProvider, GeminiProvider } from "./core/model.js";
 import { Memory } from "./core/memory.js";
 import { ContextBuilder } from "./core/context.js";
 import { Agent } from "./core/agent.js";
@@ -31,7 +31,7 @@ function boot(): void {
   console.log(`  ↳ Database: ${config.sqlitePath}`);
 
   // Initialize core components
-  const model = new AnthropicProvider(config.anthropicApiKey, config.modelName);
+  const model = new GeminiProvider(config.geminiApiKey, config.modelName);
   console.log(`  ↳ Model: ${config.modelName}`);
 
   const memory = new Memory(db);

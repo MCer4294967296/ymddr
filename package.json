@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@google/genai": "^1.51.0",
     "@hono/node-server": "^1.14.1",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",

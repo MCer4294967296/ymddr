@@ -2,6 +2,7 @@ import "dotenv/config";
 
 export interface Config {
   anthropicApiKey: string;
+  geminiApiKey: string;
   modelName: string;
   sqlitePath: string;
   httpPort: number;
@@ -11,6 +12,7 @@ export interface Config {
 
 export const config: Config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   modelName: process.env.MODEL_NAME ?? "claude-sonnet-4-20250514",
   sqlitePath: process.env.SQLITE_PATH ?? "./data/ymddr.db",
   httpPort: parseInt(process.env.HTTP_PORT ?? "3000", 10),

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,5 +45,37 @@ export class AnthropicProvider implements ModelProvider {
       (block) => block.type === "text"
     );
     return textBlocks.map((block) => block.text).join("");
+  }
+}
+
+// ── Gemini Implementation ────────────────────────────────────────────────────
+
+export class GeminiProvider implements ModelProvider {
+  private client: GoogleGenAI;
+  private model: string;
+
+  constructor(apiKey: string, model: string) {
+    this.client = new GoogleGenAI({ apiKey });
+    this.model = model;
+  }
+
+  async complete(messages: Message[]): Promise<string> {
+    const systemMessages = messages.filter((m) => m.role === "system");
+    const conversationMessages = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+
+    const response = await this.client.models.generateContent({
+      model: this.model,
+      contents: conversationMessages,
+      config: {
+        systemInstruction: systemMessages.map((m) => m.content).join("\n\n"),
+      },
+    });
+
+    return response.text || "";
   }
 }

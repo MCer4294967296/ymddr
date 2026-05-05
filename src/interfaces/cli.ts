@@ -21,6 +21,7 @@ export function startCli(agent: Agent): void {
 
     if (input === ".exit") {
       console.log("Goodbye.");
+      agent.endSession();
       rl.close();
       process.exit(0);
     }
@@ -38,6 +39,7 @@ export function startCli(agent: Agent): void {
 
   rl.on("close", () => {
     console.log("\nSession ended.");
+    agent.endSession();
     process.exit(0);
   });
 }

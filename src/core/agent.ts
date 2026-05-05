@@ -6,6 +6,7 @@ import { ContextBuilder } from "../context/context.js";
 import type { ToolRegistry } from "../tools/index.js";
 import { logger } from "../utils/logger.js";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ export class Agent {
   private history: Message[];
   private sessionId: string;
   private sessionMessages: Message[];
+  private session60MinTimer: NodeJS.Timeout | null = null;
+  private sessionEnded = false;
 
   constructor(
     model: ModelProvider,
@@ -48,6 +51,70 @@ export class Agent {
     if (!fs.existsSync(sessionDir)) {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
+
+    // 1. Reset any existing 10-minute timer
+    const pidFile = path.resolve(sessionDir, "timer_10min.pid");
+    if (fs.existsSync(pidFile)) {
+      try {
+        const pidStr = fs.readFileSync(pidFile, "utf-8");
+        const pid = parseInt(pidStr, 10);
+        if (!isNaN(pid)) {
+          process.kill(pid); // Cancel the detached timer
+          console.log(`  ↳ Canceled previous 10-minute session timer (PID: ${pid})`);
+        }
+      } catch (err) {
+        // process might not exist, ignore
+      } finally {
+        try { fs.unlinkSync(pidFile); } catch (e) {}
+      }
+    }
+
+    // 2. Start a 60-minute timer for the current session
+    const sixtyMinutesMs = 60 * 60 * 1000;
+    this.session60MinTimer = setTimeout(() => {
+      console.log(`\n[Agent] Session has reached 60 minutes. Invoking script...`);
+      const scriptPath = path.resolve("./scripts/timeout-60min.sh");
+      try {
+        const { exec } = require("node:child_process");
+        exec(scriptPath, (error: any, stdout: any, stderr: any) => {
+          if (error) console.error(`Error executing 60-minute script: ${error.message}`);
+          if (stdout) console.log(stdout);
+          if (stderr) console.error(stderr);
+        });
+      } catch (e) {
+        console.error("Failed to run 60-min timer script", e);
+      }
+    }, sixtyMinutesMs);
+    
+    // Unref so it doesn't block the event loop if the app exits normally before 60 min.
+    this.session60MinTimer.unref();
+  }
+
+  /** End the current session and start the 10-minute detached timer. */
+  endSession(): void {
+    if (this.sessionEnded) return;
+    this.sessionEnded = true;
+
+    if (this.session60MinTimer) {
+      clearTimeout(this.session60MinTimer);
+      this.session60MinTimer = null;
+    }
+
+    const tenMinutesMs = 10 * 60 * 1000;
+    const sessionDir = "./memories/sessions";
+    const pidFile = path.resolve(sessionDir, "timer_10min.pid");
+    const scriptPath = path.resolve("./scripts/timeout-10min.sh");
+    const timerScript = path.resolve("./src/utils/detached-timer.ts");
+
+    console.log(`  ↳ Session ended. Starting 10-minute timer in background...`);
+    
+    const { spawn } = require("node:child_process");
+    const child = spawn("npx", ["tsx", timerScript, tenMinutesMs.toString(), scriptPath, pidFile], {
+      detached: true,
+      stdio: "ignore"
+    });
+    
+    child.unref();
   }
 
   /** Persist a message to the session JSON file. */

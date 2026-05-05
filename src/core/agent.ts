@@ -8,6 +8,12 @@ import { logger } from "../utils/logger.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+export enum AgentState {
+  Normal,
+  GracePeriod,
+  Expired
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface MessageRow {
@@ -30,13 +36,18 @@ export class Agent {
   private sessionMessages: Message[];
   private session60MinTimer: NodeJS.Timeout | null = null;
   private sessionEnded = false;
+  private agentId: string;
+  private state: AgentState = AgentState.Normal;
+  private timeRemainingMs: number = 60 * 60 * 1000;
+  private sessionStartTime: number;
 
   constructor(
     model: ModelProvider,
     memory: Memory,
     context: ContextBuilder,
     tools: ToolRegistry,
-    db: Database.Database
+    db: Database.Database,
+    agentId: string = "default"
   ) {
     this.model = model;
     this.memory = memory;
@@ -45,15 +56,19 @@ export class Agent {
     this.db = db;
     this.history = [];
     this.sessionMessages = [];
-    this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
+    this.agentId = agentId;
+    this.sessionStartTime = Date.now();
 
     const sessionDir = "./memories/sessions";
     if (!fs.existsSync(sessionDir)) {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    // 1. Reset any existing 10-minute timer
-    const pidFile = path.resolve(sessionDir, "timer_10min.pid");
+    // 1. Reset any existing 10-minute timer and load state
+    const pidFile = path.resolve(sessionDir, `timer_10min_${this.agentId}.pid`);
+    const stateFile = path.resolve(sessionDir, `session_state_${this.agentId}.json`);
+    let resumedSessionId: string | null = null;
+
     if (fs.existsSync(pidFile)) {
       try {
         const pidStr = fs.readFileSync(pidFile, "utf-8");
@@ -67,27 +82,47 @@ export class Agent {
       } finally {
         try { fs.unlinkSync(pidFile); } catch (e) {}
       }
+
+      if (fs.existsSync(stateFile)) {
+        try {
+          const stateData = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+          if (stateData.sessionId && stateData.timeRemainingMs !== undefined) {
+            resumedSessionId = stateData.sessionId;
+            this.timeRemainingMs = stateData.timeRemainingMs;
+            console.log(`  ↳ Resumed session ${resumedSessionId} with ${Math.round(this.timeRemainingMs / 60000)}m remaining.`);
+          }
+        } catch (e) {
+          console.error("Failed to parse session state", e);
+        }
+      }
     }
 
-    // 2. Start a 60-minute timer for the current session
-    const sixtyMinutesMs = 60 * 60 * 1000;
-    this.session60MinTimer = setTimeout(() => {
-      console.log(`\n[Agent] Session has reached 60 minutes. Invoking script...`);
-      const scriptPath = path.resolve("./scripts/timeout-60min.sh");
-      try {
-        const { exec } = require("node:child_process");
-        exec(scriptPath, (error: any, stdout: any, stderr: any) => {
-          if (error) console.error(`Error executing 60-minute script: ${error.message}`);
-          if (stdout) console.log(stdout);
-          if (stderr) console.error(stderr);
-        });
-      } catch (e) {
-        console.error("Failed to run 60-min timer script", e);
+    if (resumedSessionId) {
+      this.sessionId = resumedSessionId;
+      // Load transcript
+      const transcriptFile = `./memories/sessions/${this.sessionId}.json`;
+      if (fs.existsSync(transcriptFile)) {
+        try {
+          this.sessionMessages = JSON.parse(fs.readFileSync(transcriptFile, "utf-8"));
+        } catch (e) {}
       }
-    }, sixtyMinutesMs);
+    } else {
+      this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
+      this.timeRemainingMs = 60 * 60 * 1000;
+    }
+
+    // 2. Start a timer for the current session
+    this.session60MinTimer = setTimeout(() => {
+      this.state = AgentState.GracePeriod;
+      console.log(`\n[System] Session time expired. One last prompt before the 60-minute script.`);
+    }, this.timeRemainingMs);
     
-    // Unref so it doesn't block the event loop if the app exits normally before 60 min.
+    // Unref so it doesn't block the event loop if the app exits normally
     this.session60MinTimer.unref();
+  }
+
+  public getState(): AgentState {
+    return this.state;
   }
 
   /** End the current session and start the 10-minute detached timer. */
@@ -100,9 +135,19 @@ export class Agent {
       this.session60MinTimer = null;
     }
 
-    const tenMinutesMs = 10 * 60 * 1000;
     const sessionDir = "./memories/sessions";
-    const pidFile = path.resolve(sessionDir, "timer_10min.pid");
+    const pidFile = path.resolve(sessionDir, `timer_10min_${this.agentId}.pid`);
+    const stateFile = path.resolve(sessionDir, `session_state_${this.agentId}.json`);
+
+    const elapsed = Date.now() - this.sessionStartTime;
+    this.timeRemainingMs = Math.max(0, this.timeRemainingMs - elapsed);
+
+    fs.writeFileSync(stateFile, JSON.stringify({
+      sessionId: this.sessionId,
+      timeRemainingMs: this.timeRemainingMs
+    }), "utf-8");
+
+    const tenMinutesMs = 10 * 60 * 1000;
     const scriptPath = path.resolve("./scripts/timeout-10min.sh");
     const timerScript = path.resolve("./src/utils/detached-timer.ts");
 
@@ -180,6 +225,22 @@ export class Agent {
     // Persist final assistant response
     this.saveMessage({ role: "assistant", content: finalResponse });
     this.history.push({ role: "assistant", content: finalResponse });
+
+    if (this.state === AgentState.GracePeriod) {
+      this.state = AgentState.Expired;
+      console.log(`\n[Agent] Final prompt processed. Invoking 60-minute script...`);
+      const scriptPath = path.resolve("./scripts/timeout-60min.sh");
+      try {
+        const { exec } = require("node:child_process");
+        exec(scriptPath, (error: any, stdout: any, stderr: any) => {
+          if (error) console.error(`Error executing 60-minute script: ${error.message}`);
+          if (stdout) console.log(stdout);
+          if (stderr) console.error(stderr);
+        });
+      } catch (e) {
+        console.error("Failed to run 60-min timer script", e);
+      }
+    }
 
     return finalResponse;
   }

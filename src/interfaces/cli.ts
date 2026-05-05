@@ -1,5 +1,5 @@
 import * as readline from "node:readline";
-import type { Agent } from "../core/agent.js";
+import { type Agent, AgentState } from "../core/agent.js";
 
 export function startCli(agent: Agent): void {
   const rl = readline.createInterface({
@@ -29,6 +29,12 @@ export function startCli(agent: Agent): void {
     try {
       const response = await agent.processMessage(input);
       console.log(`\n${response}`);
+
+      if (agent.getState() === AgentState.Expired) {
+        console.log("\nSession has reached its 60-minute limit. Goodbye.");
+        agent.endSession();
+        process.exit(0);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\n[error] ${message}`);

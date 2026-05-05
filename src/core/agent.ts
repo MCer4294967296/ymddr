@@ -5,6 +5,7 @@ import type { Memory } from "../memory/memory.js";
 import { ContextBuilder } from "../context/context.js";
 import type { ToolRegistry } from "../tools/index.js";
 import { logger } from "../utils/logger.js";
+import * as fs from "node:fs";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ export class Agent {
   private tools: ToolRegistry;
   private db: Database.Database;
   private history: Message[];
+  private sessionId: string;
+  private sessionMessages: Message[];
 
   constructor(
     model: ModelProvider,
@@ -38,53 +41,28 @@ export class Agent {
     this.tools = tools;
     this.db = db;
     this.history = [];
-    this.initDb();
-    this.loadHistory();
-  }
+    this.sessionMessages = [];
+    this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
 
-  /** Create the messages table if it doesn't exist. */
-  private initDb(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id        TEXT PRIMARY KEY,
-        role      TEXT NOT NULL,
-        content   TEXT NOT NULL,
-        timestamp TEXT NOT NULL
-      )
-    `);
-  }
-
-  /** Load conversation history from SQLite on startup. */
-  private loadHistory(): void {
-    const rows = this.db
-      .prepare(`SELECT * FROM messages ORDER BY timestamp ASC`)
-      .all() as MessageRow[];
-
-    this.history = rows.map((row) => ({
-      role: row.role as Message["role"],
-      content: row.content,
-    }));
-
-    if (this.history.length > 0) {
-      console.log(`  ↳ Loaded ${this.history.length} messages from history`);
+    const sessionDir = "./memories/sessions";
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
     }
   }
 
-  /** Persist a message to SQLite. */
-  private saveMessage(role: Message["role"], content: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)`
-      )
-      .run(uuidv4(), role, content, new Date().toISOString());
+  /** Persist a message to the session JSON file. */
+  private saveMessage(message: Message): void {
+    this.sessionMessages.push(message);
+    const filePath = `./memories/sessions/${this.sessionId}.json`;
+    fs.writeFileSync(filePath, JSON.stringify(this.sessionMessages, null, 2), "utf-8");
   }
 
   async processMessage(input: string): Promise<string> {
     logger.userPrompt(input);
 
     // Save user input to history immediately
-    this.saveMessage("user", input);
-    
+    this.saveMessage({ role: "user", content: input });
+
     // Build initial context. We pass all history except the current input to avoid duplication
     // because ContextBuilder.build appends the user input at the end.
     let currentMessages = this.context.build(this.history, input, this.tools);
@@ -95,7 +73,7 @@ export class Agent {
     while (true) {
       // Call the model
       const response = await this.model.complete(currentMessages);
-      
+
       logger.modelResponse(response);
 
       // Check for tool call
@@ -119,6 +97,10 @@ export class Agent {
         // Add the model's intermediate response and the tool's result to the message chain
         currentMessages.push({ role: "assistant", content: response });
         currentMessages.push({ role: "system", content: `Tool Result:\n${toolResult}` });
+
+        // Also note down tool calls in the session
+        this.saveMessage({ role: "assistant", content: response });
+        this.saveMessage({ role: "system", content: `Tool Result:\n${toolResult}` });
       } else {
         // No tool call means this is the final response
         finalResponse = response;
@@ -129,7 +111,7 @@ export class Agent {
     logger.agentResponse(finalResponse);
 
     // Persist final assistant response
-    this.saveMessage("assistant", finalResponse);
+    this.saveMessage({ role: "assistant", content: finalResponse });
     this.history.push({ role: "assistant", content: finalResponse });
 
     return finalResponse;

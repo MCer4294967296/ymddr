@@ -26,21 +26,24 @@ interface MessageRow {
 // ── Agent ────────────────────────────────────────────────────────────────────
 
 export class Agent {
+  private agentId: string;
   private model: ModelProvider;
   private memory: Memory;
   private context: ContextBuilder;
   private tools: ToolRegistry;
-  private db: Database.Database;
+  // private db: Database.Database;
+
+  private sessionId!: string;
   private history: Message[];
-  private sessionId: string;
   private sessionMessages: Message[];
-  private session60MinTimer: NodeJS.Timeout | null = null;
-  private sessionEnded = false;
-  private agentId: string;
-  private state: AgentState = AgentState.Normal;
-  private timeRemainingMs: number = 60 * 60 * 1000;
   private sessionStartTime: number;
   private sessionsDir: string;
+
+  private session60MinTimer: NodeJS.Timeout | null = null;
+
+  private sessionEnded = false;
+  private state: AgentState = AgentState.Normal;
+  private timeRemainingMs: number = 60 * 60 * 1000;
 
   constructor(
     model: ModelProvider,
@@ -50,14 +53,14 @@ export class Agent {
     db: Database.Database,
     agentId: string = "default"
   ) {
+    this.agentId = agentId;
     this.model = model;
     this.memory = memory;
     this.context = context;
     this.tools = tools;
-    this.db = db;
+    // this.db = db;
     this.history = [];
     this.sessionMessages = [];
-    this.agentId = agentId;
     this.sessionStartTime = Date.now();
     this.sessionsDir = `./data/${this.agentId}/memories/sessions`;
 
@@ -65,9 +68,20 @@ export class Agent {
       fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
 
+    this.initializeSession();
+  }
+
+
+  /**
+   * Initializes the agent's session by checking for an active 10-minute break timer 
+   * or persisted state. If found, the timer is canceled and the previous session 
+   * (including its message transcript and remaining time) is resumed. Otherwise, 
+   * a fresh session is created. Finally, sets up the 60-minute expiration timer.
+   */
+  private initializeSession(): void {
     // 1. Reset any existing 10-minute timer and load state
-    const pidFile = path.resolve(this.sessionsDir, `timer_10min_${this.agentId}.pid`);
-    const stateFile = path.resolve(this.sessionsDir, `session_state_${this.agentId}.json`);
+    const pidFile = path.resolve(this.sessionsDir, `timer_10min.pid`);
+    const stateFile = path.resolve(this.sessionsDir, `session_state.json`);
     let resumedSessionId: string | null = null;
 
     if (fs.existsSync(pidFile)) {
@@ -109,7 +123,6 @@ export class Agent {
       }
     } else {
       this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
-      this.timeRemainingMs = 60 * 60 * 1000;
     }
 
     // 2. Start a timer for the current session
@@ -136,8 +149,8 @@ export class Agent {
       this.session60MinTimer = null;
     }
 
-    const pidFile = path.resolve(this.sessionsDir, `timer_10min_${this.agentId}.pid`);
-    const stateFile = path.resolve(this.sessionsDir, `session_state_${this.agentId}.json`);
+    const pidFile = path.resolve(this.sessionsDir, `timer_10min.pid`);
+    const stateFile = path.resolve(this.sessionsDir, `session_state.json`);
 
     const elapsed = Date.now() - this.sessionStartTime;
     this.timeRemainingMs = Math.max(0, this.timeRemainingMs - elapsed);

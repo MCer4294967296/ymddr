@@ -165,7 +165,7 @@ export class Agent {
 
     console.log(`  ↳ Session ended. Starting 10-minute timer in background...`);
 
-    const child = spawn("npx", ["tsx", timerScript, tenMinutesMs.toString(), scriptPath, pidFile], {
+    const child = spawn("npx", ["tsx", timerScript, tenMinutesMs.toString(), scriptPath, pidFile, this.agentId, this.sessionId], {
       detached: true,
       stdio: "ignore"
     });
@@ -240,7 +240,8 @@ export class Agent {
       console.log(`\n[Agent] Final prompt processed. Invoking 60-minute script...`);
       const scriptPath = path.resolve("./scripts/timeout-60min.sh");
       try {
-        exec(scriptPath, (error: any, stdout: any, stderr: any) => {
+        const cmd = `${scriptPath} ${this.agentId} ${this.sessionId}`;
+        exec(cmd, (error: any, stdout: any, stderr: any) => {
           if (error) console.error(`Error executing 60-minute script: ${error.message}`);
           if (stdout) console.log(stdout);
           if (stderr) console.error(stderr);

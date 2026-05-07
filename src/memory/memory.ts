@@ -46,6 +46,21 @@ export class Memory {
     if (!fs.existsSync(layerDir)) return [];
 
     const files = fs.readdirSync(layerDir).filter(f => f.endsWith('.md'));
+
+    // Sort files based on the double-digit prefix (lower number = higher priority)
+    // Files without a numeric prefix are placed at the end (lowest priority).
+    files.sort((a, b) => {
+      const matchA = a.match(/^(\d{2})/);
+      const matchB = b.match(/^(\d{2})/);
+      const numA = matchA ? parseInt(matchA[1], 10) : 999;
+      const numB = matchB ? parseInt(matchB[1], 10) : 999;
+      
+      if (numA !== numB) {
+        return numA - numB;
+      }
+      return a.localeCompare(b);
+    });
+
     const contents: string[] = [];
     
     for (const file of files) {

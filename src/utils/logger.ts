@@ -8,8 +8,10 @@ if (!fs.existsSync(LOG_DIR)) {
 }
 
 function getLogFile() {
-  const date = new Date().toISOString().split("T")[0];
-  return path.join(LOG_DIR, `agent-${date}.log`);
+  const iso = new Date().toISOString();
+  const date = iso.split("T")[0];
+  const hour = iso.split("T")[1].split(":")[0];
+  return path.join(LOG_DIR, `agent-${date}-${hour}.log`);
 }
 
 function appendLog(level: string, message: string) {

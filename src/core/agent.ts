@@ -7,6 +7,7 @@ import type { ToolRegistry } from "../tools/index.js";
 import { logger } from "../utils/logger.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn, exec } from "node:child_process";
 
 export enum AgentState {
   Normal,
@@ -25,6 +26,9 @@ interface MessageRow {
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 
+const TIMER_PID_FILE = "timer_10min.pid";
+const SESSION_STATE_FILE = "session_state.json";
+
 export class Agent {
   private agentId: string;
   private model: ModelProvider;
@@ -34,7 +38,6 @@ export class Agent {
   // private db: Database.Database;
 
   private sessionId!: string;
-  private history: Message[];
   private sessionMessages: Message[];
   private sessionStartTime: number;
   private sessionsDir: string;
@@ -59,7 +62,6 @@ export class Agent {
     this.context = context;
     this.tools = tools;
     // this.db = db;
-    this.history = [];
     this.sessionMessages = [];
     this.sessionStartTime = Date.now();
     this.sessionsDir = `./data/${this.agentId}/memories/sessions`;
@@ -80,8 +82,8 @@ export class Agent {
    */
   private initializeSession(): void {
     // 1. Reset any existing 10-minute timer and load state
-    const pidFile = path.resolve(this.sessionsDir, `timer_10min.pid`);
-    const stateFile = path.resolve(this.sessionsDir, `session_state.json`);
+    const pidFile = path.resolve(this.sessionsDir, TIMER_PID_FILE);
+    const stateFile = path.resolve(this.sessionsDir, SESSION_STATE_FILE);
     let resumedSessionId: string | null = null;
 
     if (fs.existsSync(pidFile)) {
@@ -149,8 +151,8 @@ export class Agent {
       this.session60MinTimer = null;
     }
 
-    const pidFile = path.resolve(this.sessionsDir, `timer_10min.pid`);
-    const stateFile = path.resolve(this.sessionsDir, `session_state.json`);
+    const pidFile = path.resolve(this.sessionsDir, TIMER_PID_FILE);
+    const stateFile = path.resolve(this.sessionsDir, SESSION_STATE_FILE);
 
     const elapsed = Date.now() - this.sessionStartTime;
     this.timeRemainingMs = Math.max(0, this.timeRemainingMs - elapsed);
@@ -166,7 +168,6 @@ export class Agent {
 
     console.log(`  ↳ Session ended. Starting 10-minute timer in background...`);
 
-    const { spawn } = require("node:child_process");
     const child = spawn("npx", ["tsx", timerScript, tenMinutesMs.toString(), scriptPath, pidFile], {
       detached: true,
       stdio: "ignore"
@@ -175,23 +176,22 @@ export class Agent {
     child.unref();
   }
 
-  /** Persist a message to the session JSON file. */
+  /** Persist a message to the session JSON file. This is the short term memory. */
   private saveMessage(message: Message): void {
     this.sessionMessages.push(message);
-    const filePath = `${this.sessionsDir}/${this.sessionId}.json`;
-    fs.writeFileSync(filePath, JSON.stringify(this.sessionMessages, null, 2), "utf-8");
+    const transcriptFile = `${this.sessionsDir}/${this.sessionId}.json`;
+    fs.writeFileSync(transcriptFile, JSON.stringify(this.sessionMessages, null, 2), "utf-8");
   }
 
   async processMessage(input: string): Promise<string> {
     logger.userPrompt(input);
 
-    // Save user input to history immediately
-    this.saveMessage({ role: "user", content: input });
-
-    // Build initial context. We pass all history except the current input to avoid duplication
+    // Build initial context. We pass all session messages except the current input to avoid duplication
     // because ContextBuilder.build appends the user input at the end.
-    let currentMessages = this.context.build(this.history, input, this.tools);
-    this.history.push({ role: "user", content: input });
+    let currentMessages = this.context.build(this.sessionMessages, input, this.tools);
+
+    // Save user input to sessionMessages immediately
+    this.saveMessage({ role: "user", content: input });
 
     let finalResponse = "";
 
@@ -237,14 +237,12 @@ export class Agent {
 
     // Persist final assistant response
     this.saveMessage({ role: "assistant", content: finalResponse });
-    this.history.push({ role: "assistant", content: finalResponse });
 
     if (this.state === AgentState.GracePeriod) {
       this.state = AgentState.Expired;
       console.log(`\n[Agent] Final prompt processed. Invoking 60-minute script...`);
       const scriptPath = path.resolve("./scripts/timeout-60min.sh");
       try {
-        const { exec } = require("node:child_process");
         exec(scriptPath, (error: any, stdout: any, stderr: any) => {
           if (error) console.error(`Error executing 60-minute script: ${error.message}`);
           if (stdout) console.log(stdout);
@@ -256,15 +254,5 @@ export class Agent {
     }
 
     return finalResponse;
-  }
-
-  /** Expose memory for direct access (e.g., from tools or interfaces). */
-  getMemory(): Memory {
-    return this.memory;
-  }
-
-  /** Expose tool registry. */
-  getTools(): ToolRegistry {
-    return this.tools;
   }
 }

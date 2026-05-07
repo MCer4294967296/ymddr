@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+
 import { v4 as uuidv4 } from "uuid";
 import type { ModelProvider, Message } from "./model.js";
 import type { Memory } from "../memory/memory.js";
@@ -35,7 +35,6 @@ export class Agent {
   private memory: Memory;
   private context: ContextBuilder;
   private tools: ToolRegistry;
-  // private db: Database.Database;
 
   private sessionId!: string;
   private sessionMessages: Message[];
@@ -53,7 +52,6 @@ export class Agent {
     memory: Memory,
     context: ContextBuilder,
     tools: ToolRegistry,
-    db: Database.Database,
     agentId: string = "default"
   ) {
     this.agentId = agentId;
@@ -61,7 +59,6 @@ export class Agent {
     this.memory = memory;
     this.context = context;
     this.tools = tools;
-    // this.db = db;
     this.sessionMessages = [];
     this.sessionStartTime = Date.now();
     this.sessionsDir = `./data/${this.agentId}/memories/sessions`;

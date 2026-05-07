@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import Database from "better-sqlite3";
+
 import { config } from "./config.js";
 import { AnthropicProvider, GeminiProvider } from "./core/model.js";
 import { Memory } from "./memory/memory.js";
@@ -18,23 +18,12 @@ function boot(): void {
   console.log("  │        y m d d r         │");
   console.log("  ╰──────────────────────────╯\n");
 
-  // Ensure data directory exists
-  const dbDir = path.dirname(config.sqlitePath);
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
-    console.log(`  ↳ Created data directory: ${dbDir}`);
-  }
-
-  // Open SQLite database
-  const db = new Database(config.sqlitePath);
-  db.pragma("journal_mode = WAL");
-  console.log(`  ↳ Database: ${config.sqlitePath}`);
-
   // Initialize core components
   const model = new GeminiProvider(config.geminiApiKey, config.modelName);
   console.log(`  ↳ Model: ${config.modelName}`);
 
-  const memory = new Memory(db);
+  const agentId = "default";
+  const memory = new Memory(agentId);
   const context = new ContextBuilder(
     memory,
     config.systemPrompt,
@@ -47,7 +36,7 @@ function boot(): void {
   console.log(`  ↳ Tools: ${tools.listAll().map((t) => t.name).join(", ")}`);
 
   // Create the singleton agent
-  const agent = new Agent(model, memory, context, tools, db);
+  const agent = new Agent(model, memory, context, tools, agentId);
 
   // Start interfaces
   startHttpServer(agent, config.httpPort);

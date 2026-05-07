@@ -40,6 +40,7 @@ export class Agent {
   private state: AgentState = AgentState.Normal;
   private timeRemainingMs: number = 60 * 60 * 1000;
   private sessionStartTime: number;
+  private sessionsDir: string;
 
   constructor(
     model: ModelProvider,
@@ -58,15 +59,15 @@ export class Agent {
     this.sessionMessages = [];
     this.agentId = agentId;
     this.sessionStartTime = Date.now();
+    this.sessionsDir = `./data/${this.agentId}/memories/sessions`;
 
-    const sessionDir = "./memories/sessions";
-    if (!fs.existsSync(sessionDir)) {
-      fs.mkdirSync(sessionDir, { recursive: true });
+    if (!fs.existsSync(this.sessionsDir)) {
+      fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
 
     // 1. Reset any existing 10-minute timer and load state
-    const pidFile = path.resolve(sessionDir, `timer_10min_${this.agentId}.pid`);
-    const stateFile = path.resolve(sessionDir, `session_state_${this.agentId}.json`);
+    const pidFile = path.resolve(this.sessionsDir, `timer_10min_${this.agentId}.pid`);
+    const stateFile = path.resolve(this.sessionsDir, `session_state_${this.agentId}.json`);
     let resumedSessionId: string | null = null;
 
     if (fs.existsSync(pidFile)) {
@@ -80,7 +81,7 @@ export class Agent {
       } catch (err) {
         // process might not exist, ignore
       } finally {
-        try { fs.unlinkSync(pidFile); } catch (e) {}
+        try { fs.unlinkSync(pidFile); } catch (e) { }
       }
 
       if (fs.existsSync(stateFile)) {
@@ -100,11 +101,11 @@ export class Agent {
     if (resumedSessionId) {
       this.sessionId = resumedSessionId;
       // Load transcript
-      const transcriptFile = `./memories/sessions/${this.sessionId}.json`;
+      const transcriptFile = `${this.sessionsDir}/${this.sessionId}.json`;
       if (fs.existsSync(transcriptFile)) {
         try {
           this.sessionMessages = JSON.parse(fs.readFileSync(transcriptFile, "utf-8"));
-        } catch (e) {}
+        } catch (e) { }
       }
     } else {
       this.sessionId = new Date().toISOString().replace(/[:.]/g, '-');
@@ -116,7 +117,7 @@ export class Agent {
       this.state = AgentState.GracePeriod;
       console.log(`\n[System] Session time expired. One last prompt before the 60-minute script.`);
     }, this.timeRemainingMs);
-    
+
     // Unref so it doesn't block the event loop if the app exits normally
     this.session60MinTimer.unref();
   }
@@ -135,9 +136,8 @@ export class Agent {
       this.session60MinTimer = null;
     }
 
-    const sessionDir = "./memories/sessions";
-    const pidFile = path.resolve(sessionDir, `timer_10min_${this.agentId}.pid`);
-    const stateFile = path.resolve(sessionDir, `session_state_${this.agentId}.json`);
+    const pidFile = path.resolve(this.sessionsDir, `timer_10min_${this.agentId}.pid`);
+    const stateFile = path.resolve(this.sessionsDir, `session_state_${this.agentId}.json`);
 
     const elapsed = Date.now() - this.sessionStartTime;
     this.timeRemainingMs = Math.max(0, this.timeRemainingMs - elapsed);
@@ -152,20 +152,20 @@ export class Agent {
     const timerScript = path.resolve("./src/utils/detached-timer.ts");
 
     console.log(`  ↳ Session ended. Starting 10-minute timer in background...`);
-    
+
     const { spawn } = require("node:child_process");
     const child = spawn("npx", ["tsx", timerScript, tenMinutesMs.toString(), scriptPath, pidFile], {
       detached: true,
       stdio: "ignore"
     });
-    
+
     child.unref();
   }
 
   /** Persist a message to the session JSON file. */
   private saveMessage(message: Message): void {
     this.sessionMessages.push(message);
-    const filePath = `./memories/sessions/${this.sessionId}.json`;
+    const filePath = `${this.sessionsDir}/${this.sessionId}.json`;
     fs.writeFileSync(filePath, JSON.stringify(this.sessionMessages, null, 2), "utf-8");
   }
 

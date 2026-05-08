@@ -19,7 +19,10 @@ function boot(): void {
   console.log("  ╰──────────────────────────╯\n");
 
   // Initialize core components
-  const model = new GeminiProvider(config.geminiApiKey, config.modelName);
+  const isAnthropic = config.modelName.toLowerCase().includes("claude");
+  const model = isAnthropic
+    ? new AnthropicProvider(config.anthropicApiKey, config.modelName)
+    : new GeminiProvider(config.geminiApiKey, config.modelName);
   console.log(`  ↳ Model: ${config.modelName}`);
 
   const agentId = "default";

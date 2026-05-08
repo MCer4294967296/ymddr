@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { config } from "../config.js";
-import { GeminiProvider } from "../core/model.js";
+import { AnthropicProvider, GeminiProvider } from "../core/model.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,7 +126,10 @@ Respond ONLY with a valid JSON object matching this schema, with NO markdown for
   "demotedMemories": ["exact_filename.md"]
 }`;
 
-  const model = new GeminiProvider(config.geminiApiKey, config.modelName);
+  const isAnthropic = config.modelName.toLowerCase().includes("claude");
+  const model = isAnthropic
+    ? new AnthropicProvider(config.anthropicApiKey, config.modelName)
+    : new GeminiProvider(config.geminiApiKey, config.modelName);
 
   try {
     const responseText = await model.complete([{ role: "user", content: prompt }]);
